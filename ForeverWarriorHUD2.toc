@@ -1,0 +1,9 @@
+## Interface: 16001
+## Title: ForeverWarriorHUD2
+## Notes: Warrior HUD: rage bar, rage regen, swing timer and 37 ability icons with cooldown sweeps, countdown timers and a ready flash. CTRL-drag with a grid and sticky edges, auto-hide out of combat, reflowing options window, 40 skins, named profile save/load. Text tab: font, size, outline, placement and number formats. Frames tab: player, target and target-of-target frames. Map tab: minimap and world map.
+## Author: ChekChek12
+## Version: 2.0.0
+## OptionalDeps: ForeverFonts, LibSharedMedia-3.0
+## SavedVariables: ForeverWarriorHUD2_DB
+
+ForeverWarriorHUD2.lua
