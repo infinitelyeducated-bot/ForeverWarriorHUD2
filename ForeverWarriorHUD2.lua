@@ -65,7 +65,7 @@ local db               -- declared here so Snap() below sees the real table
 local ME = {}          -- mouse editing, notifications, menu art (see "Mouse editing")
 
 -- How close two items must come, in screen pixels, before their edges stick.
-local STICK_DISTANCE = 14
+local STICK_DISTANCE = 10
 
 local function Snap(v)
     if not db or not db.gridSnap then return v end
@@ -789,25 +789,23 @@ local function StickToNeighbours(self, cx, cy, ux, uy)
     -- snap off = the item stays exactly where it was released
     if not db.sticky or not db.gridSnap then return cx, cy end
     local mw, mh = ScreenSize(self)
-    local best, bestScore = nil, nil
-    local bestGX, bestGY = 0, 0
+    local best, bestGap, bestAxis
     for _, other in ipairs(ALL_ITEMS) do
-        if other ~= self and other:IsShown() then
+        if other ~= self and other:IsShown() and (not other.IsVisible or other:IsVisible()) then
             local ox, oy = ScreenCenter(other)
             if ox then
-                local ocx = ox - ux - db.baseX
-                local ocy = oy - uy - db.baseY
                 local ow, oh = ScreenSize(other)
-                local gx = math.abs(cx - ocx) - (ow + mw) / 2
-                local gy = math.abs(cy - ocy) - (oh + mh) / 2
-                -- close on either axis is enough: two bars of different
-                -- heights can still be dropped side by side
-                -- close on BOTH axes: sharing a row with a far-away item is not "near"
-                if gx <= STICK_DISTANCE and gy <= STICK_DISTANCE then
-                    local score = math.min(gx, gy)
-                    if not bestScore or score < bestScore then
-                        best, bestScore, bestGX, bestGY = other, score, gx, gy
-                    end
+                -- gap between the facing edges; below zero the two overlap on that axis
+                local gx = math.abs(cx - (ox - ux - db.baseX)) - (ow + mw) / 2
+                local gy = math.abs(cy - (oy - uy - db.baseY)) - (oh + mh) / 2
+                local gap, axis
+                if gy < 0 and math.abs(gx) <= STICK_DISTANCE then
+                    gap, axis = math.abs(gx), "x"      -- beside it: left or right edge
+                elseif gx < 0 and math.abs(gy) <= STICK_DISTANCE then
+                    gap, axis = math.abs(gy), "y"      -- above or below it
+                end
+                if gap and (not bestGap or gap < bestGap) then
+                    best, bestGap, bestAxis = other, gap, axis
                 end
             end
         end
@@ -818,15 +816,28 @@ local function StickToNeighbours(self, cx, cy, ux, uy)
     local ocx = ox - ux - db.baseX
     local ocy = oy - uy - db.baseY
     local ow, oh = ScreenSize(best)
-    -- abut on the axis whose gap is smaller, align on the other
-    if bestGX <= bestGY then
-        cy = ocy
-        cx = ocx + (cx >= ocx and 1 or -1) * (ow + mw) / 2
-    else
-        cx = ocx
-        cy = ocy + (cy >= ocy and 1 or -1) * (oh + mh) / 2
+    -- line up centres or an outer edge, whichever is nearest, if it is close already
+    local function Align(v, o, half)
+        local pick, d = nil, STICK_DISTANCE
+        for _, cand in ipairs({ o, o + half, o - half }) do
+            local dd = math.abs(v - cand)
+            if dd <= d then pick, d = cand, dd end
+        end
+        return pick
     end
-    return cx, cy
+    local stuckX, stuckY = false, false
+    if bestAxis == "x" then
+        cx = ocx + (cx >= ocx and 1 or -1) * (ow + mw) / 2
+        stuckX = true
+        local a = Align(cy, ocy, (oh - mh) / 2)
+        if a then cy, stuckY = a, true end
+    else
+        cy = ocy + (cy >= ocy and 1 or -1) * (oh + mh) / 2
+        stuckY = true
+        local a = Align(cx, ocx, (ow - mw) / 2)
+        if a then cx, stuckX = a, true end
+    end
+    return cx, cy, stuckX, stuckY
 end
 
 -----------------------------------------------------------------------
@@ -892,10 +903,12 @@ function ME.Drop(self)
     if fx and ux then
         local cx = fx - ux - db.baseX
         local cy = fy - uy - db.baseY
-        -- grid first, then stick: a sticky drop wins over the grid
-        cx = Snap(cx)
-        cy = Snap(cy)
-        cx, cy = StickToNeighbours(self, cx, cy, ux, uy)
+        -- stick from where the item was really let go (never from a grid-rounded
+        -- place), then the grid takes whichever axis did not stick
+        local sx, sy
+        cx, cy, sx, sy = StickToNeighbours(self, cx, cy, ux, uy)
+        if not sx then cx = Snap(cx) end
+        if not sy then cy = Snap(cy) end
         cfg.x = math.floor(cx + 0.5)
         cfg.y = math.floor(cy + 0.5)
     end
