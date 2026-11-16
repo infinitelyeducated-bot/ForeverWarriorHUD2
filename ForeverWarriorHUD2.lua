@@ -156,7 +156,7 @@ local DEFAULTS = {
     schemes = {},        -- saved custom colour sets, by name (kept by Reset to default)
     art = "high",        -- menu artwork: "high", "low" or "off" (needs the ForeverArt addon)
     artBanner = "a",     -- which header picture: "a" painted, "b" the alternate
-    notify = { sweep = true, cooldownDark = true, readyFlash = true, activeGlow = true, usableDim = true, rangeTint = true },
+    notify = { cdOnly = true, sweep = true, cooldownDark = true, readyFlash = true, activeGlow = true, usableDim = true, rangeTint = true },
     cooldownText = true, -- numeric countdown on every ability icon
     -- Text engine. One block per HUD text; sizes match the fonts the
     -- original inherited (GameFontHighlightSmall 10, GameFontNormal 12).
@@ -581,6 +581,13 @@ for _, a in ipairs(ABILITIES) do
     btn.glow:SetBlendMode("ADD")
     btn.glow:SetVertexColor(1, 0.85, 0.3, 0.35)
     btn.glow:Hide()
+    -- the light that flashes over the picture when the ability is ready again
+    btn.ready = btn.over:CreateTexture(nil, "ARTWORK")
+    btn.ready:SetTexture(WHITE)
+    btn.ready:SetAllPoints(btn)
+    btn.ready:SetBlendMode("ADD")
+    btn.ready:SetVertexColor(1, 1, 0.8, 1)
+    btn.ready:Hide()
     btn.spell = a
     btn.spellId = a.id   -- replaced by ResolveSpells() once the client answers
     spellIcons[a.key] = btn
@@ -1144,6 +1151,7 @@ end
 -- Abilities tab, one saved field, one line in the profile clamp.
 -----------------------------------------------------------------------
 ME.NOTIFY = {
+    { key = "cdOnly",     label = "Show an ability only while on cooldown" },
     { key = "sweep",      label = "Clock sweep while on cooldown" },
     { key = "cooldownDark", label = "Darken an ability while it is on cooldown" },
     { key = "readyFlash", label = "Flash when an ability comes off cooldown" },
@@ -1151,6 +1159,37 @@ ME.NOTIFY = {
     { key = "usableDim",  label = "Dim abilities you cannot use right now" },
     { key = "rangeTint",  label = "Red tint when the target is out of range" },
 }
+ME.FLASH = 0.35   -- seconds the ready flash lasts
+ME.FADE = 0.45    -- seconds the icon then takes to fade out
+-- How visible an ability icon is right now. btn._cooling and btn._readyAt are
+-- set by UpdateSpellIcon from plain values only.
+function ME.IconFade(btn, now)
+    local base = btn._alpha or 1
+    if not db or not db.notify or not db.notify.cdOnly or EditMode() or btn._cooling then
+        btn._fading = nil
+        if not btn._cooling and db and db.notify and not db.notify.cdOnly then btn._readyAt = nil end
+        btn.ready:Hide()
+        btn:SetAlpha(base)
+        return
+    end
+    local flash = db.notify.readyFlash and ME.FLASH or 0
+    local t = btn._readyAt and (now - btn._readyAt)
+    if not t or t < 0 or t >= flash + ME.FADE then
+        btn._readyAt, btn._fading = nil, nil
+        btn.ready:Hide()
+        btn:SetAlpha(0)
+    elseif t < flash then
+        btn._fading = true
+        btn:SetAlpha(base)
+        -- two quick pulses of light
+        btn.ready:SetAlpha(0.7 * math.abs(math.cos(t / flash * math.pi * 2)))
+        btn.ready:Show()
+    else
+        btn._fading = true
+        btn.ready:Hide()
+        btn:SetAlpha(base * (1 - (t - flash) / ME.FADE))
+    end
+end
 function ME.ClampNotify(src)
     if type(db.notify) ~= "table" then db.notify = {} end
     for _, n in ipairs(ME.NOTIFY) do
@@ -2942,7 +2981,8 @@ ApplySpell = function(key)
     btn:SetPoint("CENTER", UIParent, "CENTER", (db.baseX + cfg.x) / sc, (db.baseY + cfg.y) / sc)
     btn:SetScale(sc)
     btn:SetSize(cfg.w, cfg.h)
-    btn:SetAlpha(cfg.alpha or 1)
+    btn._alpha = cfg.alpha or 1
+    ME.IconFade(btn, GetTime())
     -- the picture turns; the border, the sweep and the number stay upright
     if btn.icon.SetRotation then btn.icon:SetRotation(math.rad(cfg.rot or 0)) end
     if db.shown and cfg.enabled and HudVisible() then btn:Show() else btn:Hide() end
@@ -5938,6 +5978,7 @@ local function UpdateSpellIcon(btn)
     if C_Spell and C_Spell.GetSpellCooldown then ok, info = pcall(C_Spell.GetSpellCooldown, id) end
     if not ok or type(info) ~= "table" then
         btn.timer:SetText("")
+        btn._cooling = false
         return
     end
     local start = info.startTime
@@ -5946,7 +5987,21 @@ local function UpdateSpellIcon(btn)
     -- it was; it runs out on its own.
     if not IsReadable(start) or not IsReadable(dur) or type(start) ~= "number" or type(dur) ~= "number" then
         btn.timer:SetText("")
-        btn._wasOnCd = false
+        -- the numbers are hidden from addons (combat): "isActive" is still told.
+        -- If even that is missing the icon stays on screen rather than vanish.
+        local act = info.isActive
+        if IsReadable(act) and type(act) == "boolean" then
+            if act then
+                btn._wasOnCd = true
+            elseif btn._wasOnCd then
+                btn._wasOnCd = false
+                btn._readyAt = now
+            end
+            btn._cooling = act
+        else
+            btn._cooling = true
+            btn._wasOnCd = false
+        end
         return
     end
     local remaining = 0
@@ -5957,6 +6012,7 @@ local function UpdateSpellIcon(btn)
             btn._cdStart, btn._cdDur = start, dur
         end
         btn._wasOnCd = true
+        btn._cooling = true
         if db.cooldownText and remaining < 3600 then
             btn.timer:SetText(FormatRemaining(remaining))
         else
@@ -5968,9 +6024,11 @@ local function UpdateSpellIcon(btn)
             btn._cdStart, btn._cdDur = nil, nil
         end
         btn.timer:SetText("")
+        btn._cooling = false
         if btn._wasOnCd then
             -- on cooldown -> ready: flash once
             btn._wasOnCd = false
+            btn._readyAt = now
             if db.notify.readyFlash then
                 btn._flashUntil = now + 0.25
                 btn:SetBackdropBorderColor(Col(currentSkin.spark, 1))
@@ -5983,7 +6041,10 @@ local spellTick = 0
 local function UpdateAllSpells()
     spellTick = 0
     for key, btn in pairs(spellIcons) do
-        if btn:IsShown() then UpdateSpellIcon(btn) end
+        if btn:IsShown() then
+            UpdateSpellIcon(btn)
+            ME.IconFade(btn, GetTime())
+        end
     end
 end
 
@@ -5992,8 +6053,12 @@ cdUI.refresh = UpdateAllSpells   -- the Config toggle repaints the icons at once
 -- Hundredths need every frame. This touches only icons that are on a cooldown
 -- already read by the pass above (plain numbers), and asks the client nothing.
 function ME.TickTimers()
-    if not db.cooldownText then return end
     local now = GetTime()
+    -- the ready flash and the fade are drawn every frame
+    for _, btn in pairs(spellIcons) do
+        if btn._fading and btn:IsShown() then ME.IconFade(btn, now) end
+    end
+    if not db.cooldownText then return end
     for _, btn in pairs(spellIcons) do
         if btn._cdStart and btn:IsShown() then
             local rem = btn._cdStart + btn._cdDur - now
