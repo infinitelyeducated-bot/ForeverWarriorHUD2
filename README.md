@@ -45,7 +45,7 @@ These work only while the menu is open and Lock is off. Point at any bar or icon
 - **Grid, snap, stick** - The grid shows while the menu is open. Snap drops an item on the nearest grid line; Stick makes an item dropped right beside another one click against its edge.
 - **Menu closed** - Nothing can be clicked or moved, so the HUD never gets in the way of the game.
 
-Because the mouse does all of this, the menu has no position, scale or orientation controls.
+Position and turning are done with the mouse; size is done both ways: CTRL + wheel on the item, or the Scale slider in the menu (one for each bar and each icon). The menu has no X / Y or orientation controls.
 
 </details>
 
@@ -66,8 +66,9 @@ Because the mouse does all of this, the menu has no position, scale or orientati
 **Each element: Rage bar, Rage regen, Swing timer, Combo points, Recent actions**
 
 - **Show** - The switch on the right of the element's heading.
-- **Width / Height** - The shape of the bar or of one pip or icon. Size as a whole is the mouse wheel.
+- **Width / Height** - The shape of the bar or of one pip or icon.
 - **Opacity** - 0.1 to 1.
+- **Scale** - Size of the whole item, 0.5 to 3. The same value as CTRL + wheel on the item.
 
 **Rage bar and Rage regen**
 
@@ -115,6 +116,7 @@ Because the mouse does all of this, the menu has no position, scale or orientati
 
 - **On** - Gives the ability an icon. New icons appear in a grid above the HUD; move them with the mouse.
 - **Opacity** - 0.1 to 1 for that icon.
+- **Scale** - Size of this icon, 0.5 to 3. The same value as CTRL + wheel on the icon.
 - **Font, Number size** - A typeface and number size for that one icon; 0 uses the shared setting.
 
 On by default: Charge, Intercept, Pummel, Overpower, Whirlwind, Bloodrage, Berserker Rage. The full list with spell IDs is at the end of this page.
