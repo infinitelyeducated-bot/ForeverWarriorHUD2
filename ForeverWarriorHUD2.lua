@@ -168,6 +168,7 @@ local DEFAULTS = {
         swing  = { size = 10, anchor = "CENTER", x = 0, y = 0, decimals = 2 },
         timer  = { size = 10, anchor = "BOTTOMRIGHT", x = -1, y = 1, format = "auto" },
     },
+    combined = false, -- energy, regen and swing drawn as one bar
     elements = {
         energy = { enabled = true, x = 0, y = 0,   w = 220, h = 16, alpha = 1.0, scale = 1.0, rot = 0,
                    showText = true },
@@ -207,7 +208,7 @@ end
 -- to defaults or loading a profile can never delete them.
 local CONFIG_KEYS = {
     "baseX", "baseY", "scale", "shown", "locked", "autoHide", "autoHideOOC",
-    "orientation", "gridSnap", "gridSize", "sticky", "skin", "cooldownText", "notify", "custom", "customOn", "text", "frames", "map", "elements", "spells",
+    "orientation", "gridSnap", "gridSize", "sticky", "skin", "cooldownText", "notify", "custom", "customOn", "combined", "text", "frames", "map", "elements", "spells",
 }
 DEFAULTS.profiles = {}
 local panel
@@ -1004,10 +1005,11 @@ function ME.Wheel(self, delta)
 end
 
 -- hover: light the item up and say what the mouse does to it
-function ME.Enter(self)
-    if not EditMode() then return end
-    if self._edit then self._edit:SetVertexColor(0.2, 0.8, 1, 0.5) end
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+-- The item tip sits to the LEFT of the cursor. It shows only while CTRL is held,
+-- or once the mouse has rested on the item for 10 seconds (then it stays).
+ME.TIP_DELAY = 10
+function ME.ShowTip(self)
+    GameTooltip:SetOwner(self, "ANCHOR_CURSOR_LEFT")
     GameTooltip:SetText(self._label or "HUD item", 1, 1, 1)
     if db.locked then
         GameTooltip:AddLine("Locked. Untick Lock on the HUD tab to edit.", 1, 0.6, 0.6, true)
@@ -1020,8 +1022,32 @@ function ME.Enter(self)
     end
     GameTooltip:Show()
 end
+-- one shared driver watches the item under the cursor; the items keep their own scripts
+ME.tipOwner, ME.tipShown = nil, false
+ME.tipDriver = CreateFrame("Frame")
+ME.tipDriver:SetSize(1, 1)   -- a frame with no size is not run every frame
+ME.tipDriver:SetScript("OnUpdate", function(_, elapsed)
+    local fr = ME.tipOwner
+    if not fr then return end
+    fr._hover = (fr._hover or 0) + (elapsed or 0)
+    if fr._hover >= ME.TIP_DELAY then fr._pinned = true end
+    local want = fr._pinned or (IsControlKeyDown and IsControlKeyDown()) or false
+    if want and not ME.tipShown then
+        ME.ShowTip(fr); ME.tipShown = true
+    elseif not want and ME.tipShown then
+        GameTooltip:Hide(); ME.tipShown = false
+    end
+end)
+ME.tipDriver:Show()   -- a hidden frame gets no OnUpdate in the client
+function ME.Enter(self)
+    if not EditMode() then return end
+    if self._edit then self._edit:SetVertexColor(0.2, 0.8, 1, 0.5) end
+    self._hover, self._pinned = 0, false
+    ME.tipOwner, ME.tipShown = self, false
+end
 function ME.Leave(self)
     if self._edit then self._edit:SetVertexColor(0.2, 0.8, 1, 0.25) end
+    if ME.tipOwner == self then ME.tipOwner, ME.tipShown = nil, false end
     GameTooltip:Hide()
 end
 
@@ -2200,6 +2226,21 @@ local ELEMENT_INFO = {
 }
 -- Width, height and opacity only: place, size and rotation are done with the
 -- mouse on the item itself.
+-- A Scale slider also takes CTRL + mouse wheel: up is bigger, down is smaller, a step of 0.05.
+ME.ScaleWheel = function(sl)
+    if not sl.EnableMouseWheel then return end
+    sl:EnableMouseWheel(true)
+    sl:SetScript("OnMouseWheel", function(self, delta)
+        if not (IsControlKeyDown and IsControlKeyDown()) then return end
+        self:SetValue((self:GetValue() or 1) + (delta > 0 and 0.05 or -0.05))
+    end)
+end
+-- one bar for energy, regen and swing: the regen overlay sits on the energy bar, the swing strip under it
+ME.joinCB = MakeCheck(hudChild, "FRHW2JoinCB", 12, 0, "Join energy, regen and swing into one bar", function(self)
+    db.combined = self:GetChecked() and true or false
+    for _, k in ipairs({ "energy", "regen", "swing" }) do ApplyElement(k) end
+end)
+Row(hudFlow, LAYOUT.check, ME.joinCB)
 local elemCB, elemW, elemH, elemA, elemS = {}, {}, {}, {}, {}
 for _, info in ipairs(ELEMENT_INFO) do
     local key = info.key
@@ -2220,6 +2261,7 @@ for _, info in ipairs(ELEMENT_INFO) do
     elemS[key] = MakeSlider(hudChild, "FRHW2S_" .. key, 240, 0, 190, 0.5, 3, 0.05, "Scale", function(v)
         db.elements[key].scale = v; ApplyElement(key)
     end)
+    ME.ScaleWheel(elemS[key])
     HeaderRow(hudFlow, info.label, elemCB[key])
     Row(hudFlow, LAYOUT.slider, elemW[key], elemH[key])
     if key == "energy" then
@@ -2307,6 +2349,7 @@ for _, a in ipairs(ABILITIES) do
     cfgS[key] = MakeSlider(cfgChild, "FRHW2CFGS_" .. key, 230, 0, 190, 0.5, 3, 0.05, "Scale", function(v)
         db.spells[key].scale = v; ApplySpell(key)
     end)
+    ME.ScaleWheel(cfgS[key])
     HeaderRow(cfgFlow, a.name, cfgCB[key])
     Row(cfgFlow, LAYOUT.slider, cfgA[key], cfgS[key])
     -- typeface and number size of this ability's countdown (2 build)
@@ -2593,6 +2636,7 @@ local function ApplyConfig(src)
     TXT.Clamp(src.text)
     UF.Clamp(src.frames)
     MP.Clamp(src.map)
+    db.combined    = src.combined == true
     db.orientation = "h"   -- kept for old profiles only: every item has its own rotation now
     ME.ClampNotify(src.notify)
     ME.ClampCustom(src.custom, src.customOn)
@@ -2891,7 +2935,7 @@ do
     HeaderRow(flow, "Editing the HUD with the mouse")
     Para("This only works while this window is open and Lock (HUD tab) is off. Point at any bar or icon: it lights up and a tooltip names it.")
     Para("MOVE: hold CTRL, then hold the left mouse button on the item. It follows the cursor. Let go to drop it.")
-    Para("SIZE: hold CTRL and roll the mouse wheel over the item. Up is bigger, down is smaller. Or drag its Scale slider: bars are on the HUD tab, icons on the Abilities tab (the same size either way).")
+    Para("SIZE: hold CTRL and roll the mouse wheel over the item. Up is bigger, down is smaller. Or use its Scale slider: bars are on the HUD tab, icons on the Abilities tab. Hold CTRL and roll the wheel over a Scale slider too (a step of 0.05). All three give the same size.")
     Para("TURN: hold CTRL, then hold the right mouse button on the item and drag around it. It stays as you leave it.")
     Para("STRAIGHTEN: double-click the right mouse button on the item. It goes back to its original orientation.")
     Para("Icons turn to any angle. Bars, combo points and the recent-actions row turn in quarter turns; their text stays upright.")
@@ -3012,6 +3056,26 @@ end
 -- exposed so a macro or a test can re-apply the live configuration on demand
 FRHW2_ApplyAll = function() if db then ApplyAll() end end
 FRHW2_ApplyElement = function(key) if db then ApplyElement(key) end end
+ME._applyBase = ApplyElement
+function ME.JoinBar(key)
+    local ef, fr = elems.energy, elems[key]
+    if not (db and db.combined) or not ef or not fr or (key ~= "regen" and key ~= "swing") then return end
+    local ee = db.elements.energy
+    local sc = db.scale * (ee.scale or 1)
+    fr:ClearAllPoints()
+    if key == "swing" then
+        fr:SetPoint("TOP", ef, "BOTTOM", 0, -2)
+        fr:SetSize(ee.w, 4)
+    else
+        fr:SetPoint("CENTER", ef, "CENTER", 0, 0)
+        fr:SetSize(ee.w, ee.h)
+    end
+    fr:SetScale(sc)
+end
+ApplyElement = function(key)
+    ME._applyBase(key)
+    ME.JoinBar(key)
+end
 
 -----------------------------------------------------------------------
 -- Skins: repaint the HUD and the options window
@@ -5750,6 +5814,7 @@ function FRHW2_RefreshPanel()
         elemH[key]:SetValue(db.elements[key].h)
         elemA[key]:SetValue(db.elements[key].alpha or 1)
         elemS[key]:SetValue(db.elements[key].scale or 1)
+        ME.joinCB:SetChecked(db.combined)
     end
     local sw = db.elements.swing
     swingUI.skinCB:SetChecked(sw.useSkinColor)

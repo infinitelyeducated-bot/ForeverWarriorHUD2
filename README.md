@@ -61,6 +61,7 @@ Position and turning are done with the mouse; size is done both ways: CTRL + whe
 - **Auto-hide out of combat** - Hides the whole HUD until combat starts. The open menu always shows it.
 - **Auto-hide combo at 0** - Hides the combo points while you have none and are out of combat.
 - **Snap items to grid / Grid size** - Drops land on the grid; Grid size (8 to 64) sets the spacing.
+- **Join energy, regen and swing into one bar** - Switch on from the HUD tab. The regen overlay sits on the energy bar and the swing strip runs under it; the three move and scale together. Each keeps its own colours and options.
 - **Stick items together** - A drop right next to another item abuts its edge. Needs Snap on.
 
 **Each element: Rage bar, Rage regen, Swing timer, Combo points, Recent actions**
@@ -68,7 +69,7 @@ Position and turning are done with the mouse; size is done both ways: CTRL + whe
 - **Show** - The switch on the right of the element's heading.
 - **Width / Height** - The shape of the bar or of one pip or icon.
 - **Opacity** - 0.1 to 1.
-- **Scale** - Size of the whole item, 0.5 to 3. The same value as CTRL + wheel on the item.
+- **Scale** - Size of the whole item, 0.5 to 3. The same value as CTRL + wheel on the item. Hold CTRL and roll the wheel over this slider to step it by 0.05.
 
 **Rage bar and Rage regen**
 
@@ -116,7 +117,7 @@ Position and turning are done with the mouse; size is done both ways: CTRL + whe
 
 - **On** - Gives the ability an icon. New icons appear in a grid above the HUD; move them with the mouse.
 - **Opacity** - 0.1 to 1 for that icon.
-- **Scale** - Size of this icon, 0.5 to 3. The same value as CTRL + wheel on the icon.
+- **Scale** - Size of this icon, 0.5 to 3. The same value as CTRL + wheel on the icon. Hold CTRL and roll the wheel over this slider to step it by 0.05.
 - **Font, Number size** - A typeface and number size for that one icon; 0 uses the shared setting.
 
 On by default: Charge, Intercept, Pummel, Overpower, Whirlwind, Bloodrage, Berserker Rage. The full list with spell IDs is at the end of this page.
