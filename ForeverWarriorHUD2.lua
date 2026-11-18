@@ -208,7 +208,7 @@ end
 -- to defaults or loading a profile can never delete them.
 local CONFIG_KEYS = {
     "baseX", "baseY", "scale", "shown", "locked", "autoHide", "autoHideOOC",
-    "orientation", "gridSnap", "gridSize", "sticky", "skin", "cooldownText", "notify", "custom", "customOn", "combined", "text", "frames", "map", "elements", "spells",
+    "orientation", "gridSnap", "gridSize", "sticky", "skin", "cooldownText", "notify", "custom", "customOn", "combined", "text", "frames", "party", "map", "elements", "spells",
 }
 DEFAULTS.profiles = {}
 local panel
@@ -857,7 +857,7 @@ end
 --   right double-click   back to its original orientation (no CTRL needed)
 -- Position, size and rotation are therefore NOT in the options window.
 -----------------------------------------------------------------------
-ME.SCALE_STEP = 0.05   -- per wheel notch
+ME.SCALE_STEP = 0.25   -- per wheel notch
 ME.DOUBLE = 0.4        -- seconds between the two clicks of a double-click
 
 function ME.Active()
@@ -999,7 +999,7 @@ function ME.Wheel(self, delta)
     local cfg = self._cfg()
     local sc = (cfg.scale or 1) + ((delta > 0) and ME.SCALE_STEP or -ME.SCALE_STEP)
     sc = math.floor(sc * 100 + 0.5) / 100
-    if sc < 0.2 then sc = 0.2 elseif sc > 4 then sc = 4 end
+    if sc < 0.2 then sc = 0.2 elseif sc > 10 then sc = 10 end
     cfg.scale = sc
     self._reapply()
 end
@@ -2226,13 +2226,13 @@ local ELEMENT_INFO = {
 }
 -- Width, height and opacity only: place, size and rotation are done with the
 -- mouse on the item itself.
--- A Scale slider also takes CTRL + mouse wheel: up is bigger, down is smaller, a step of 0.05.
+-- A Scale slider also takes CTRL + mouse wheel: up is bigger, down is smaller, a step of 0.25.
 ME.ScaleWheel = function(sl)
     if not sl.EnableMouseWheel then return end
     sl:EnableMouseWheel(true)
     sl:SetScript("OnMouseWheel", function(self, delta)
         if not (IsControlKeyDown and IsControlKeyDown()) then return end
-        self:SetValue((self:GetValue() or 1) + (delta > 0 and 0.05 or -0.05))
+        self:SetValue((self:GetValue() or 1) + (delta > 0 and ME.SCALE_STEP or -ME.SCALE_STEP))
     end)
 end
 -- one bar for energy, regen and swing: the regen overlay sits on the energy bar, the swing strip under it
@@ -2258,7 +2258,7 @@ for _, info in ipairs(ELEMENT_INFO) do
         db.elements[key].alpha = v; ApplyElement(key)
     end)
     -- size from the menu as well as with CTRL + wheel on the item (same saved value)
-    elemS[key] = MakeSlider(hudChild, "FRHW2S_" .. key, 240, 0, 190, 0.5, 3, 0.05, "Scale", function(v)
+    elemS[key] = MakeSlider(hudChild, "FRHW2S_" .. key, 240, 0, 190, 0.5, 10, 0.05, "Scale", function(v)
         db.elements[key].scale = v; ApplyElement(key)
     end)
     ME.ScaleWheel(elemS[key])
@@ -2346,7 +2346,7 @@ for _, a in ipairs(ABILITIES) do
         db.spells[key].alpha = v; ApplySpell(key)
     end)
     -- icon size from the menu (the same saved value as CTRL + wheel on the icon)
-    cfgS[key] = MakeSlider(cfgChild, "FRHW2CFGS_" .. key, 230, 0, 190, 0.5, 3, 0.05, "Scale", function(v)
+    cfgS[key] = MakeSlider(cfgChild, "FRHW2CFGS_" .. key, 230, 0, 190, 0.5, 10, 0.05, "Scale", function(v)
         db.spells[key].scale = v; ApplySpell(key)
     end)
     ME.ScaleWheel(cfgS[key])
@@ -2634,7 +2634,7 @@ local function ApplyConfig(src)
     db.sticky      = src.sticky ~= false
     db.cooldownText = src.cooldownText ~= false
     TXT.Clamp(src.text)
-    UF.Clamp(src.frames)
+    UF.Clamp(src.frames, src.party)
     MP.Clamp(src.map)
     db.combined    = src.combined == true
     db.orientation = "h"   -- kept for old profiles only: every item has its own rotation now
@@ -2655,7 +2655,7 @@ local function ApplyConfig(src)
             e.w       = Num(s.w, 4, 600, def.w)
             e.h       = Num(s.h, 4, 600, def.h)
             e.alpha   = Num(s.alpha, 0.05, 1, def.alpha)
-            e.scale   = Num(s.scale, 0.2, 4, def.scale)
+            e.scale   = Num(s.scale, 0.2, 10, def.scale)
             -- a profile from before 2.0 has no rotation: "vertical" becomes a quarter turn
             if s.rot == nil and src.orientation == "v" then e.rot = 90 else e.rot = ME.Norm(s.rot, false) end
             if key == "energy" then e.showText = s.showText ~= false end
@@ -2682,7 +2682,7 @@ local function ApplyConfig(src)
             e.h       = Num(s.h, 6, 200, def.h)
             e.rot     = ME.Norm(s.rot, true)
             e.alpha   = Num(s.alpha, 0.05, 1, def.alpha)
-            e.scale   = Num(s.scale, 0.2, 4, def.scale)
+            e.scale   = Num(s.scale, 0.2, 10, def.scale)
             TXT.ClampItem(e, s)
         else
             db.spells[key] = DeepCopy(def)
@@ -3728,6 +3728,246 @@ do
 end
 
 -----------------------------------------------------------------------
+-- Party window: you on top, then party 1 to 4, in ONE floating window.
+--
+--   * Each row is a secure unit button, so a click can cast a spell on that
+--     player WITHOUT changing your target (type "spell" + the row's unit).
+--     What each click does is typed on the Frames tab: a spell name, "target",
+--     "menu", or nothing. Hovering a row also makes it your mouseover unit.
+--   * Move it at any time, menu open or not: hold CTRL + ALT + SHIFT and the
+--     left mouse button on it; let go to drop it. The same three keys and the
+--     mouse wheel resize it. (With the menu open, plain CTRL works too, like
+--     every other item.) Not in combat: the game forbids moving it then.
+--
+-- Settings: db.party. The rows themselves are ordinary unit frames
+-- (db.frames.partyplayer, party1 .. party4) and take every Frames option.
+-----------------------------------------------------------------------
+UF.PARTY_KEYS = { "partyplayer", "party1", "party2", "party3", "party4" }
+UF.PARTY_CLICKS = {
+    { k = "left",       l = "Left click",          a = "type1",       s = "spell1" },
+    { k = "right",      l = "Right click",         a = "type2",       s = "spell2" },
+    { k = "middle",     l = "Middle click",        a = "type3",       s = "spell3" },
+    { k = "shiftLeft",  l = "Shift + left click",  a = "shift-type1", s = "shift-spell1" },
+    { k = "shiftRight", l = "Shift + right click", a = "shift-type2", s = "shift-spell2" },
+    { k = "ctrlLeft",   l = "Ctrl + left click",   a = "ctrl-type1",  s = "ctrl-spell1" },
+    { k = "altLeft",    l = "Alt + left click",    a = "alt-type1",   s = "alt-spell1" },
+}
+UF.PARTY_PAD = 3     -- border inside the window
+UF.PARTY_GRIP = 9    -- the strip along the top you can always grab
+
+DEFAULTS.party = {
+    x = -560, y = 60, scale = 1,
+    back = true,          -- draw the window behind the rows
+    hideSolo = false,     -- hide the whole window while you are not in a group
+    gap = 2,
+    clicks = { left = "target", right = "menu", middle = "",
+               shiftLeft = "", shiftRight = "", ctrlLeft = "", altLeft = "" },
+}
+
+UF.ClampParty = function(src)
+    local d = DEFAULTS.party
+    if type(src) ~= "table" then src = {} end
+    local out = {
+        x = Num(src.x, -2000, 2000, d.x), y = Num(src.y, -2000, 2000, d.y),
+        scale = Num(src.scale, 0.5, 3, d.scale),
+        back = src.back ~= false, hideSolo = src.hideSolo == true,
+        gap = math.floor(Num(src.gap, 0, 20, d.gap) + 0.5),
+        clicks = {},
+    }
+    for i = 1, #UF.PARTY_CLICKS do
+        local k = UF.PARTY_CLICKS[i].k
+        local v = type(src.clicks) == "table" and src.clicks[k] or nil
+        if type(v) ~= "string" then v = d.clicks[k] end
+        v = v:gsub("[%c]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if #v > 60 then v = v:sub(1, 60) end
+        out.clicks[k] = v
+    end
+    db.party = out
+end
+
+-- all three keys down: the chord that moves and sizes the window
+UF.PartyChord = function()
+    return IsControlKeyDown and IsAltKeyDown and IsShiftKeyDown
+        and IsControlKeyDown() and IsAltKeyDown() and IsShiftKeyDown() and true or false
+end
+-- may the window be moved or sized right now?
+UF.PartyCanEdit = function()
+    if not db or not db.party or UF.Locked() then return false end
+    if UF.PartyChord() then return true end
+    return ME.Active() and IsControlKeyDown and IsControlKeyDown() and true or false
+end
+
+UF.PartyDown = function(button)
+    if button ~= "LeftButton" or not UF.pw or not UF.PartyCanEdit() then return end
+    UF.pw:StartMoving()
+    UF.pwDragging = true
+end
+UF.PartyUp = function(button)
+    if not UF.pwDragging then return end
+    UF.pwDragging = false
+    UF.pw:StopMovingOrSizing()
+    local fx, fy = ScreenCenter(UF.pw)
+    local ux, uy = UIParent:GetCenter()
+    if fx and ux then
+        local x, y = fx - ux, fy - uy
+        -- the grid only applies while the menu (and so the grid) is on screen
+        if EditMode() then x, y = Snap(x), Snap(y) end
+        db.party.x, db.party.y = math.floor(x + 0.5), math.floor(y + 0.5)
+    end
+    UF.Apply()
+end
+UF.PartyWheel = function(delta)
+    if not UF.pw or not UF.PartyCanEdit() then return end
+    local sc = math.floor(((db.party.scale or 1) + ((delta > 0) and ME.SCALE_STEP or -ME.SCALE_STEP)) * 100 + 0.5) / 100
+    if sc < 0.5 then sc = 0.5 elseif sc > 3 then sc = 3 end
+    db.party.scale = sc
+    UF.Apply()
+end
+
+-- The window itself: not secure, so it can carry the scripts; the rows are
+-- anchored to it and follow it.
+UF.PartyWindow = function()
+    if UF.pw then return UF.pw end
+    local w = CreateFrame("Frame", "FRHW2PartyWindow", UIParent, "BackdropTemplate")
+    w:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = 1,
+                    insets = { left = 1, right = 1, top = 1, bottom = 1 } })
+    w:SetFrameStrata("LOW")
+    w:SetMovable(true)
+    w:SetClampedToScreen(true)
+    w:EnableMouse(true)
+    w.grip = Decor(w, "ARTWORK")
+    w.grip:SetPoint("TOPLEFT", 1, -1)
+    w.grip:SetPoint("TOPRIGHT", -1, -1)
+    w.grip:SetHeight(UF.PARTY_GRIP - 2)
+    w:SetScript("OnMouseDown", function(_, button) UF.PartyDown(button) end)
+    w:SetScript("OnMouseUp", function(_, button) UF.PartyUp(button) end)
+    w:SetScript("OnMouseWheel", function(_, delta) UF.PartyWheel(delta) end)
+    w:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Party window", 1, 1, 1)
+        GameTooltip:AddLine("CTRL + ALT + SHIFT + hold left button: move", nil, nil, nil, true)
+        GameTooltip:AddLine("CTRL + ALT + SHIFT + mouse wheel: size", nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    w:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    w:Hide()
+    -- the wheel belongs to the window only while the chord is held (or the
+    -- menu is open), so it never swallows the camera zoom in play
+    w.ev = CreateFrame("Frame")
+    w.ev:SetScript("OnEvent", function(_, event)
+        if event == "MODIFIER_STATE_CHANGED" then
+            UF.PartyWheelOn()
+        elseif db and db.party then
+            UF.PartyLayout()   -- the group changed, or combat ended
+        end
+    end)
+    for _, ev in ipairs({ "MODIFIER_STATE_CHANGED", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED" }) do
+        pcall(function() w.ev:RegisterEvent(ev) end)
+    end
+    UF.pw = w
+    return w
+end
+
+UF.PartyWheelOn = function()
+    if not UF.pw or UF.Locked() then return end
+    local on = UF.PartyChord() or EditMode()
+    if UF.pw.EnableMouseWheel then UF.pw:EnableMouseWheel(on) end
+    for i = 1, #UF.PARTY_KEYS do
+        local f = UF.frames[UF.PARTY_KEYS[i]]
+        if f and f.EnableMouseWheel then f:EnableMouseWheel(on) end
+    end
+end
+
+-- how many of party1..4 exist right now
+UF.PartySize = function()
+    local n = 0
+    for i = 1, 4 do
+        local ok, there = pcall(UnitExists, "party" .. i)
+        if ok and IsReadable(there) and there then n = i end
+    end
+    return n
+end
+
+-- What a click on a row does. Only out of combat (UF.Apply sees to that).
+UF.PartyBind = function(f)
+    if not (f.secure and f.SetAttribute) then return end
+    for i = 1, #UF.PARTY_CLICKS do
+        local c = UF.PARTY_CLICKS[i]
+        local v = db.party.clicks[c.k]
+        if v == "target" then
+            f:SetAttribute(c.a, "target"); f:SetAttribute(c.s, nil)
+        elseif v == "menu" then
+            f:SetAttribute(c.a, "togglemenu"); f:SetAttribute(c.s, nil)
+        elseif v == "" then
+            f:SetAttribute(c.a, "none"); f:SetAttribute(c.s, nil)   -- nothing, and no fall back to the plain click
+        else
+            f:SetAttribute(c.a, "spell"); f:SetAttribute(c.s, v)    -- cast on this row's unit; the target stays
+        end
+    end
+    -- the move chord must never also fire a click
+    f:SetAttribute("alt-ctrl-shift-type1", "none")
+    f:SetAttribute("alt-ctrl-shift-type2", "none")
+end
+
+-- Called from UF.Apply for a party row instead of the free placement.
+UF.PartyPlace = function(f, info, cfg, y)
+    local p = db.party
+    f:SetScale(p.scale)
+    f:SetPoint("TOPLEFT", UF.PartyWindow(), "TOPLEFT", UF.PARTY_PAD, -(UF.PARTY_GRIP + y))
+    UF.PartyBind(f)
+end
+
+-- Size, place and show the window round the rows that are on.
+UF.PartyLayout = function()
+    if not db or not db.party or not db.frames then return end
+    if UF.Locked() then TXT.AfterCombat("frames", UF.Apply) return end
+    local p, edit = db.party, EditMode()
+    local members = UF.PartySize()
+    local w, h, any, anyOn = 0, 0, false, false
+    for i = 1, #UF.PARTY_KEYS do
+        local key = UF.PARTY_KEYS[i]
+        local cfg = db.frames[key]
+        if cfg.enabled then anyOn = true end
+        -- a row counts if it is on (or the menu is open) and its player is there
+        local there = edit or key == "partyplayer" or tonumber(key:match("%d")) <= members
+        if (cfg.enabled or edit) and there then
+            any = true
+            if cfg.w > w then w = cfg.w end
+            h = h + cfg.h + p.gap
+        end
+    end
+    local solo = members == 0
+    if not any or (p.hideSolo and solo and not edit) then
+        if UF.pw then UF.pw:Hide() end   -- never build the window just to hide it
+        return
+    end
+    local win = UF.PartyWindow()
+    win:ClearAllPoints()
+    win:SetScale(p.scale)
+    win:SetPoint("CENTER", UIParent, "CENTER", p.x / p.scale, p.y / p.scale)
+    win:SetSize(w + 2 * UF.PARTY_PAD, h - p.gap + UF.PARTY_GRIP + UF.PARTY_PAD)
+    local a = p.back and 0.85 or 0
+    win:SetBackdropColor(currentSkin.panel[1], currentSkin.panel[2], currentSkin.panel[3], a * (anyOn and 1 or 0.5))
+    win:SetBackdropBorderColor(currentSkin.border[1], currentSkin.border[2], currentSkin.border[3], p.back and 1 or 0)
+    win.grip:SetVertexColor(currentSkin.accent[1], currentSkin.accent[2], currentSkin.accent[3], p.back and 0.45 or 0.2)
+    win:Show()
+    UF.PartyWheelOn()
+end
+
+-- "Enable the party window" switches all five rows together.
+UF.PartySetOn = function(on)
+    for i = 1, #UF.PARTY_KEYS do db.frames[UF.PARTY_KEYS[i]].enabled = on and true or false end
+    UF.Apply()
+    UF.Refresh()
+end
+UF.PartyIsOn = function()
+    for i = 1, #UF.PARTY_KEYS do
+        if db.frames[UF.PARTY_KEYS[i]].enabled then return true end
+    end
+    return false
+end
+
+-----------------------------------------------------------------------
 -- Option schemas (shared by the Frames and Map tabs)
 --
 -- A tab's options are one list of rows. Each row is
@@ -3927,10 +4167,12 @@ UF.UNITS = {
     { key = "player",       unit = "player",       label = "Player",           blizz = "PlayerFrame" },
     { key = "target",       unit = "target",       label = "Target",           blizz = "TargetFrame" },
     { key = "targettarget", unit = "targettarget", label = "Target of target", blizz = "TargetFrameToT" },
-    { key = "party1", unit = "party1", label = "Party 1", blizz = "PartyMemberFrame1" },
-    { key = "party2", unit = "party2", label = "Party 2", blizz = "PartyMemberFrame2" },
-    { key = "party3", unit = "party3", label = "Party 3", blizz = "PartyMemberFrame3" },
-    { key = "party4", unit = "party4", label = "Party 4", blizz = "PartyMemberFrame4" },
+    -- the party window's rows, top to bottom (see party_section.lua)
+    { key = "partyplayer", unit = "player", label = "You (party)", party = true },
+    { key = "party1", unit = "party1", label = "Party 1", blizz = "PartyMemberFrame1", party = true },
+    { key = "party2", unit = "party2", label = "Party 2", blizz = "PartyMemberFrame2", party = true },
+    { key = "party3", unit = "party3", label = "Party 3", blizz = "PartyMemberFrame3", party = true },
+    { key = "party4", unit = "party4", label = "Party 4", blizz = "PartyMemberFrame4", party = true },
 }
 UF.COLORS = {
     { key = "class",  name = "Class / reaction" },
@@ -3990,6 +4232,7 @@ UF.CUSTOM = {
     { key = "powp",  name = "Power %" },
 }
 UF.PLAYER = { player = true }
+UF.TGT = { target = true }
 UF.NOTTOT = { player = true, target = true }
 
 -- Every per-frame option, in the order and groups ElvUI lists them.
@@ -3999,9 +4242,9 @@ UF.OPTS = {
     { k = "hideBlizzard", t = "check",  l = "Hide the game's own frame", d = true },
     { k = "x",     t = "slider", mouse = true, l = "X (from screen centre)", d = 0, du = { player = -290, target = 290, party1 = -560, party2 = -560, party3 = -560, party4 = -560 }, min = -1200, max = 1200, step = 1 },
     { k = "y",     t = "slider", mouse = true, l = "Y (from screen centre)", d = -190, du = { targettarget = -240, party1 = -120, party2 = -72, party3 = -24, party4 = 24 }, min = -700, max = 700, step = 1 },
-    { k = "w",     t = "slider", l = "Width",  d = 230, du = { targettarget = 130, party1 = 150, party2 = 150, party3 = 150, party4 = 150 }, min = 40, max = 600, step = 1 },
-    { k = "h",     t = "slider", l = "Height", d = 34,  du = { targettarget = 24, party1 = 28, party2 = 28, party3 = 28, party4 = 28 },  min = 10, max = 200, step = 1 },
-    { k = "scale", t = "slider", mouse = true, l = "Scale",   d = 1, min = 0.5, max = 3, step = 0.05 },
+    { k = "w",     t = "slider", l = "Width",  d = 230, du = { targettarget = 130, partyplayer = 150, party1 = 150, party2 = 150, party3 = 150, party4 = 150 }, min = 40, max = 600, step = 1 },
+    { k = "h",     t = "slider", l = "Height", d = 34,  du = { targettarget = 24, partyplayer = 28, party1 = 28, party2 = 28, party3 = 28, party4 = 28 },  min = 10, max = 200, step = 1 },
+    { k = "scale", t = "slider", mouse = true, l = "Scale",   d = 1, min = 0.5, max = 10, step = 0.05 },
     { k = "alpha", t = "slider", l = "Opacity", d = 1, min = 0.1, max = 1, step = 0.05 },
     { k = "strata",  t = "cycle",  l = "Strata", d = "LOW", list = UF.STRATA },
     { k = "level",   t = "slider", l = "Frame level", d = 5, min = 1, max = 50, step = 1 },
@@ -4076,6 +4319,14 @@ UF.OPTS = {
 
     { t = "header", l = "Debuffs" },
     { k = "dOn",   t = "check",  l = "Show debuffs", d = true, du = { targettarget = false } },
+    { k = "dTint", t = "check",  l = "Tint health bar by debuff type", d = false, only = UF.NOTTOT },
+    { k = "tbOn",  t = "check",  l = "Health bars on enemy nameplates", d = false, only = UF.TGT },
+    { k = "tbW",   t = "slider", l = "Nameplate bar width", d = 110, min = 40, max = 300, step = 1, only = UF.TGT },
+    { k = "tbH",   t = "slider", l = "Nameplate bar height", d = 10, min = 4, max = 30, step = 1, only = UF.TGT },
+    { k = "tbCP",  t = "check",  l = "Combo points on the bar I add them to", d = true, only = UF.TGT },
+    { k = "tbDT",  t = "check",  l = "Tint that bar by debuff type", d = true, only = UF.TGT },
+    { k = "tbBu",  t = "check",  l = "Enemy buffs I can steal or dispel, above the bar", d = true, only = UF.TGT },
+    { k = "tbDe",  t = "check",  l = "Debuffs I applied or can dispel, under the bar", d = true, only = UF.TGT },
     { k = "dMine", t = "check",  l = "Only mine", d = false },
     { k = "dMax",  t = "slider", l = "How many", d = 8, min = 1, max = 24, step = 1 },
     { k = "dSize", t = "slider", l = "Icon size", d = 20, min = 12, max = 48, step = 1 },
@@ -4142,7 +4393,8 @@ for i = 1, #UF.UNITS do
 end
 
 -- Fill and validate db.frames from SavedVariables or a profile.
-UF.Clamp = function(src)
+UF.Clamp = function(src, party)
+    UF.ClampParty(party)
     local out = {}
     for i = 1, #UF.UNITS do
         local key = UF.UNITS[i].key
@@ -4516,23 +4768,26 @@ UF.Create = function(info)
     f:SetMovable(true)
     f:SetClampedToScreen(true)
     f:SetScript("OnMouseWheel", function(self, delta)
+        if info.party then UF.PartyWheel(delta) return end
         if not ME.Active() or UF.Locked() then return end
         if not (IsControlKeyDown and IsControlKeyDown()) then return end
         local cfg = db.frames[info.key]
         local sc = math.floor(((cfg.scale or 1) + ((delta > 0) and ME.SCALE_STEP or -ME.SCALE_STEP)) * 100 + 0.5) / 100
-        if sc < 0.5 then sc = 0.5 elseif sc > 3 then sc = 3 end
+        if sc < 0.5 then sc = 0.5 elseif sc > 10 then sc = 10 end
         cfg.scale = sc
         UF.Apply()
         UF.Refresh()
     end)
     if f.EnableMouseWheel then f:EnableMouseWheel(EditMode()) end
     f:HookScript("OnMouseDown", function(self, button)
+        if info.party then UF.PartyDown(button) return end
         if button ~= "LeftButton" or not ME.Active() or UF.Locked() then return end
         if not (IsControlKeyDown and IsControlKeyDown()) then return end
         self:StartMoving()
         self._dragging = true
     end)
     f:HookScript("OnMouseUp", function(self, button)
+        if info.party then UF.PartyUp(button) return end
         if button ~= "LeftButton" or not self._dragging then return end
         self._dragging = false
         self:StopMovingOrSizing()
@@ -4557,6 +4812,8 @@ UF.Create = function(info)
             UF.Health(f)
         elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" then
             UF.Power(f)
+            -- combo points on the player feed the target bar
+            if info.key == "player" and UF.frames.target then UF.TBUpdate(UF.frames.target) end
         elseif event == "UNIT_PORTRAIT_UPDATE" or event == "UNIT_MODEL_CHANGED" then
             UF.Portrait(f)
         elseif event == "UNIT_THREAT_SITUATION_UPDATE" then
@@ -4705,6 +4962,7 @@ UF.Apply = function()
     end
     UF.interp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut or nil
     local edit = EditMode()
+    local partyY = 0   -- where the next party-window row goes
     for i = 1, #UF.UNITS do
         local info = UF.UNITS[i]
         local cfg = db.frames[info.key]
@@ -4719,10 +4977,16 @@ UF.Apply = function()
         end
         if f then
             if f.secure and UnregisterUnitWatch then UnregisterUnitWatch(f) end
+            if f._vis and UnregisterStateDriver then UnregisterStateDriver(f, "visibility"); f._vis = nil end
             if want then
                 f:ClearAllPoints()
-                f:SetScale(cfg.scale)
-                f:SetPoint("CENTER", UIParent, "CENTER", cfg.x / cfg.scale, cfg.y / cfg.scale)
+                if info.party then
+                    UF.PartyPlace(f, info, cfg, partyY)
+                    partyY = partyY + cfg.h + db.party.gap
+                else
+                    f:SetScale(cfg.scale)
+                    f:SetPoint("CENTER", UIParent, "CENTER", cfg.x / cfg.scale, cfg.y / cfg.scale)
+                end
                 f:SetSize(cfg.w, cfg.h)
                 f:SetFrameStrata(cfg.strata)
                 f:SetFrameLevel(cfg.level)
@@ -4751,7 +5015,11 @@ UF.Apply = function()
                 else
                     f:SetAlpha(0.45)
                 end
-                if info.key == "player" or edit then
+                if info.key == "partyplayer" and not edit and db.party.hideSolo and f.secure and RegisterStateDriver then
+                    -- your own row leaves with the window while you are alone
+                    RegisterStateDriver(f, "visibility", "[group] show; hide")
+                    f._vis = true
+                elseif info.unit == "player" or edit then
                     f:Show()                    -- the options window shows every frame
                 elseif f.secure and RegisterUnitWatch then
                     RegisterUnitWatch(f)        -- the client shows it while the unit exists
@@ -4769,6 +5037,7 @@ UF.Apply = function()
     TXT.Stash(_G.PlayerCastingBarFrame or _G.CastingBarFrame, pc.enabled and pc.cb and pc.cbHideBlizz)
     UF.Fonts()
     UF.Paint()
+    UF.PartyLayout()
 end
 
 -- Show the selected unit's settings on the Frames tab.
@@ -4825,6 +5094,8 @@ do
         end, "FRHW2UFSel_" .. info.key)
     end
     Row(flow, LAYOUT.slider, ui.pick.player, ui.pick.targettarget, ui.pick.target)
+    Row(flow, LAYOUT.slider, ui.pick.partyplayer, ui.pick.party2, ui.pick.party1)
+    Row(flow, LAYOUT.slider, ui.pick.party3, nil, ui.pick.party4)
     NoteRow(flow, "")
     ui.status = flow.rows[#flow.rows].note
     flow.rows[#flow.rows].h = 34   -- room for two lines
@@ -4835,6 +5106,58 @@ do
             UF.Apply()
             if not isSlider then UF.Refresh() end
         end)
+
+    -- ---- the party window (party_section.lua) ----
+    HeaderRow(flow, "Party window: you on top, then your party")
+    NoteRow(flow, "Move it any time, menu open or not: hold CTRL + ALT + SHIFT and the left mouse button on it, let go to drop it. The same keys and the mouse wheel resize it. Not in combat.")
+    flow.rows[#flow.rows].h = 42
+    ui.pwOn = MakeCheck(child, "FRHW2PW_On", 0, 0, "Enable the party window", function(self)
+        UF.PartySetOn(self:GetChecked())
+    end)
+    ui.pwBack = MakeCheck(child, "FRHW2PW_Back", 0, 0, "Window background", function(self)
+        db.party.back = self:GetChecked() and true or false
+        UF.Apply()
+    end)
+    ui.pwSolo = MakeCheck(child, "FRHW2PW_Solo", 0, 0, "Hide when not in a group", function(self)
+        db.party.hideSolo = self:GetChecked() and true or false
+        UF.Apply()
+    end)
+    Row(flow, LAYOUT.check, ui.pwOn, ui.pwBack)
+    Row(flow, LAYOUT.check, ui.pwSolo)
+    NoteRow(flow, "What a click on a row does. Type a spell name exactly as in your spellbook: it is cast on that player and your target does not change. Or type target, or menu, or leave it empty for nothing.")
+    flow.rows[#flow.rows].h = 42
+    ui.pwClick = {}
+    do
+        local pending
+        for i = 1, #UF.PARTY_CLICKS do
+            local c = UF.PARTY_CLICKS[i]
+            local box = CreateFrame("EditBox", "FRHW2PW_Click_" .. c.k, child, "InputBoxTemplate")
+            box:SetSize(180, 18)
+            box:SetAutoFocus(false)
+            box:SetMaxLetters(60)
+            box._kind = "slider"   -- laid out like a slider: label above, as wide as its column
+            box.label = child:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            box.label:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 0, 1)
+            box.label:SetText(c.l)
+            skinned.text[#skinned.text + 1] = box.label
+            local function commit(self)
+                db.party.clicks[c.k] = self:GetText() or ""
+                UF.ClampParty(db.party)
+                UF.Apply()
+                self:SetText(db.party.clicks[c.k])
+            end
+            box:SetScript("OnEnterPressed", function(self) self:ClearFocus(); commit(self) end)
+            box:SetScript("OnEscapePressed", function(self) self:SetText(db.party.clicks[c.k]); self:ClearFocus() end)
+            box:SetScript("OnEditFocusLost", commit)
+            ui.pwClick[c.k] = box
+            if pending then
+                Row(flow, 36, pending, box); pending = nil
+            else
+                pending = box
+            end
+        end
+        if pending then Row(flow, 36, pending) end
+    end
 
     -- opening the window shows every frame that is on (so it can be placed
     -- with nothing targeted); closing it hands them back to the client
@@ -4849,6 +5172,22 @@ ME.onInteractive = function(on)
     if db and db.frames then UF.Apply() end
     for _, f in pairs(UF.frames) do
         if f.EnableMouseWheel then f:EnableMouseWheel(on) end
+    end
+end
+
+-- the Frames tab's refresh also shows the party window's own options
+do
+    local base = UF.Refresh
+    UF.Refresh = function()
+        base()
+        local ui = UF.ui
+        if not (ui and ui.pwOn and db and db.party) then return end
+        ui.pwOn:SetChecked(UF.PartyIsOn())
+        ui.pwBack:SetChecked(db.party.back)
+        ui.pwSolo:SetChecked(db.party.hideSolo)
+        for k, box in pairs(ui.pwClick) do
+            if not (box.HasFocus and box:HasFocus()) then box:SetText(db.party.clicks[k]) end
+        end
     end
 end
 
@@ -5156,6 +5495,27 @@ UF.AurasAll = function(f)
     UF.FillAuras(f, f.buffs, cfg.bOn, cfg.bMax, cfg.bMine and "HELPFUL|PLAYER" or "HELPFUL")
     UF.FillAuras(f, f.debuffs, cfg.dOn, cfg.dMax, cfg.dMine and "HARMFUL|PLAYER" or "HARMFUL")
     UF.AuraBars(f)
+    UF.DispelTint(f)
+end
+
+-- Health bar tint from the debuff on the unit (first one the client gives a dispel type for).
+UF.DispelTint = function(f)
+    local cfg = db.frames[f.info.key]
+    if not cfg.dTint then return end
+    local A = C_UnitAuras
+    local r, g, b
+    if A and A.GetAuraDataByIndex and DebuffTypeColor then
+        for i = 1, 40 do
+            local ok, a = pcall(A.GetAuraDataByIndex, f.unit, i, "HARMFUL")
+            if not ok or type(a) ~= "table" then break end
+            local dn = a.dispelName
+            if IsReadable(dn) and type(dn) == "string" and DebuffTypeColor[dn] then
+                r, g, b = DebuffTypeColor[dn].r, DebuffTypeColor[dn].g, DebuffTypeColor[dn].b
+                break
+            end
+        end
+    end
+    if r then f.health:SetStatusBarColor(r, g, b, 1) else UF.Tint(f) end
 end
 
 -- ----------------------------------------------------------- incoming heals
@@ -5224,6 +5584,180 @@ UF.Combo = function(f)
     end
 end
 
+-- ------------------------------------------------ enemy nameplate bars
+-- Each enemy nameplate can carry a small health bar in the player frame's colours.
+-- On the target's plate, when the player is a rogue or druid, five combo pips sit
+-- over the top edge, half on the bar. Above the bar: enemy buffs you can steal or
+-- dispel. Below it: debuffs you applied, or can dispel. A debuff's dispel type can
+-- tint the bar.
+local NP_AURAS = 4        -- icons per row
+local NP_UNITS = 40       -- nameplate1 .. nameplate40
+
+UF.DispelColor = function(unit)
+    local A = C_UnitAuras
+    if not (A and A.GetAuraDataByIndex and DebuffTypeColor) then return nil end
+    for i = 1, 40 do
+        local ok, a = pcall(A.GetAuraDataByIndex, unit, i, "HARMFUL")
+        if not ok or type(a) ~= "table" then break end
+        local dn = a.dispelName
+        if IsReadable(dn) and type(dn) == "string" and DebuffTypeColor[dn] then
+            return DebuffTypeColor[dn].r, DebuffTypeColor[dn].g, DebuffTypeColor[dn].b
+        end
+    end
+    return nil
+end
+
+-- The same health colour the unit frame itself would use (before any debuff tint).
+UF.PlateColour = function(cfg, unit)
+    local r, g, b = Col(currentSkin.bar)
+    if cfg.color == "custom" then
+        r, g, b = cfg.hr, cfg.hg, cfg.hb
+    elseif cfg.color == "class" then
+        local cr, cg, cb = UF.UnitColor(unit)
+        if cr then r, g, b = cr, cg, cb end
+    end
+    return r, g, b
+end
+
+local function NPIcons(parent, n)
+    local list = {}
+    for i = 1, n do
+        local t = parent:CreateTexture(nil, "OVERLAY")
+        t:Hide()
+        list[i] = t
+    end
+    return list
+end
+
+-- One bar per enemy plate, made the first time that plate needs one.
+UF.Plate = function(f, unit)
+    f.plates = f.plates or {}
+    local tb = f.plates[unit]
+    if tb then return tb end
+    tb = CreateFrame("StatusBar", nil, UIParent)
+    tb:SetStatusBarTexture(WHITE)
+    tb.bg = Decor(tb, "BACKGROUND")
+    tb.bg:SetPoint("TOPLEFT", -1, 1)
+    tb.bg:SetPoint("BOTTOMRIGHT", 1, -1)
+    tb.bg:SetVertexColor(0, 0, 0, 0.85)
+    tb.cp = {}
+    for i = 1, 5 do
+        local p = CreateFrame("StatusBar", nil, tb)
+        p:SetStatusBarTexture(WHITE)
+        p:SetMinMaxValues(0, 1)
+        p:SetValue(1)
+        p:SetStatusBarColor(Col(currentSkin.combo, 1))
+        tb.cp[i] = p
+    end
+    tb.buffs = NPIcons(tb, NP_AURAS)
+    tb.debuffs = NPIcons(tb, NP_AURAS)
+    f.plates[unit] = tb
+    return tb
+end
+
+-- Fill the aura rows of one plate: buffs you can steal or dispel, debuffs you
+-- applied or can dispel. Icons are only shown for auras the client gives us.
+UF.PlateAuras = function(tb, cfg, unit, isz, pipH)
+    local A = C_UnitAuras
+    local nb, nd = 0, 0
+    for _, row in ipairs({ { filter = "HELPFUL", list = tb.buffs, on = cfg.tbBu }, { filter = "HARMFUL", list = tb.debuffs, on = cfg.tbDe } }) do
+        local n = 0
+        if row.on and A and A.GetAuraDataByIndex then
+            for i = 1, 40 do
+                local ok, a = pcall(A.GetAuraDataByIndex, unit, i, row.filter)
+                if not ok or type(a) ~= "table" then break end
+                local keep = false
+                if row.filter == "HELPFUL" then
+                    local steal = IsReadable(a.isStealable) and a.isStealable == true
+                    local disp = IsReadable(a.dispelName) and type(a.dispelName) == "string" and a.dispelName ~= ""
+                    keep = steal or disp
+                else
+                    local mine = IsReadable(a.isFromPlayerOrPlayerPet) and a.isFromPlayerOrPlayerPet == true
+                    local disp = IsReadable(a.dispelName) and type(a.dispelName) == "string" and a.dispelName ~= ""
+                    keep = mine or disp
+                end
+                if keep and n < NP_AURAS then
+                    n = n + 1
+                    row.list[n]:SetTexture(a.icon)
+                end
+            end
+        end
+        if row.filter == "HELPFUL" then nb = n else nd = n end
+    end
+    for i = 1, NP_AURAS do
+        local bt, dt = tb.buffs[i], tb.debuffs[i]
+        bt:ClearAllPoints(); dt:ClearAllPoints()
+        bt:SetSize(isz, isz); dt:SetSize(isz, isz)
+        bt:SetPoint("BOTTOMLEFT", tb, "TOPLEFT", (i - 1) * (isz + 1), pipH / 2 + 2)
+        dt:SetPoint("TOPLEFT", tb, "BOTTOMLEFT", (i - 1) * (isz + 1), -2)
+        bt:SetShown(i <= nb)
+        dt:SetShown(i <= nd)
+    end
+end
+
+-- One plate, when its unit is an enemy the client has a nameplate for.
+UF.PlateUpdate = function(f, unit, cfg)
+    local np = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit(unit)
+    local have = np and UnitExists(unit) and UnitCanAttack("player", unit)
+    if not (cfg.tbOn and have) then
+        if f.plates and f.plates[unit] then f.plates[unit]:Hide() end
+        return
+    end
+    local tb = UF.Plate(f, unit)
+    tb:ClearAllPoints()
+    tb:SetPoint("BOTTOM", np, "TOP", 0, 4)
+    tb:SetSize(cfg.tbW, cfg.tbH)
+
+    local r, g, b = UF.PlateColour(cfg, unit)
+    if cfg.tbDT then
+        local dr, dg, db2 = UF.DispelColor(unit)
+        if dr then r, g, b = dr, dg, db2 end
+    end
+    tb:SetStatusBarColor(r, g, b, 1)
+    tb.bg:SetVertexColor(r * 0.25, g * 0.25, b * 0.25, cfg.bgAlpha)
+    tb:SetMinMaxValues(0, UnitHealthMax(unit))
+    tb:SetValue(UnitHealth(unit))
+
+    -- combo pips: only on the unit the player's combo points are on, rogue or druid
+    local _, cls = UnitClass("player")
+    local pipH = math.max(3, math.floor(cfg.tbH * 0.6))
+    local pw = (cfg.tbW - 4 * 2) / 5
+    local cp = (cfg.tbCP and IsReadable(cls) and (cls == "ROGUE" or cls == "DRUID") and UnitIsUnit(unit, "target"))
+        and GetComboPoints("player", "target")
+    local showPips = IsReadable(cp) and type(cp) == "number"
+    for i = 1, 5 do
+        local p = tb.cp[i]
+        p:ClearAllPoints()
+        p:SetSize(pw, pipH)
+        p:SetPoint("BOTTOMLEFT", tb, "TOPLEFT", (i - 1) * (pw + 2), -pipH / 2)   -- half on the bar
+        p:SetAlpha(showPips and (i <= cp and 1 or 0.2) or 1)
+        p:SetShown(showPips)
+    end
+
+    UF.PlateAuras(tb, cfg, unit, math.max(8, cfg.tbH + 2), pipH)
+    tb:Show()
+end
+
+-- Every enemy plate. Called on the target frame's updates and on the events below.
+UF.TBUpdate = function(f)
+    if f.info.key ~= "target" then return end
+    UF.TBDriver(f)
+    local cfg = db.frames[f.info.key]
+    for i = 1, NP_UNITS do UF.PlateUpdate(f, "nameplate" .. i, cfg) end
+end
+
+-- Listens for the events that change a plate, so the bars follow without a frame update.
+UF.TBDriver = function(f)
+    if f.tbDrv then return end
+    local drv = CreateFrame("Frame")
+    for _, ev in ipairs({ "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "PLAYER_TARGET_CHANGED",
+                          "UNIT_HEALTH", "UNIT_AURA", "UNIT_POWER_UPDATE" }) do
+        pcall(drv.RegisterEvent, drv, ev)
+    end
+    drv:SetScript("OnEvent", function() UF.TBUpdate(f) end)
+    f.tbDrv = drv
+end
+
 -- ------------------------------------------------------------- status icons
 UF.Status = function(f)
     local cfg = db.frames[f.info.key]
@@ -5250,6 +5784,7 @@ UF.More = function(f)
     UF.Status(f)
     UF.Custom(f)
     if f.cp then UF.Combo(f) end
+    UF.TBUpdate(f)
 end
 
 -- And for a unit that does not (the placeholder shown while placing a frame).
@@ -6301,7 +6836,7 @@ boot:SetScript("OnEvent", function()
     db.cooldownText = db.cooldownText ~= false
     TXT.LoadSharedFonts()
     TXT.Clamp(db.text)
-    UF.Clamp(db.frames)
+    UF.Clamp(db.frames, db.party)
     MP.Clamp(db.map)
     -- once: a countdown still sitting on the old default (centre, size 12) moves to the corner
     if not db.timerCorner then

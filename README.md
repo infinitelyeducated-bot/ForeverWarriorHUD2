@@ -69,7 +69,7 @@ Position and turning are done with the mouse; size is done both ways: CTRL + whe
 - **Show** - The switch on the right of the element's heading.
 - **Width / Height** - The shape of the bar or of one pip or icon.
 - **Opacity** - 0.1 to 1.
-- **Scale** - Size of the whole item, 0.5 to 3. The same value as CTRL + wheel on the item. Hold CTRL and roll the wheel over this slider to step it by 0.05.
+- **Scale** - Size of the whole item, 0.5 and up, with no maximum. The same value as CTRL + wheel on the item. Hold CTRL and roll the wheel over this slider to step it by 0.25.
 
 **Rage bar and Rage regen**
 
@@ -117,7 +117,7 @@ Position and turning are done with the mouse; size is done both ways: CTRL + whe
 
 - **On** - Gives the ability an icon. New icons appear in a grid above the HUD; move them with the mouse.
 - **Opacity** - 0.1 to 1 for that icon.
-- **Scale** - Size of this icon, 0.5 to 3. The same value as CTRL + wheel on the icon. Hold CTRL and roll the wheel over this slider to step it by 0.05.
+- **Scale** - Size of this icon, 0.5 and up, with no maximum. The same value as CTRL + wheel on the icon. Hold CTRL and roll the wheel over this slider to step it by 0.25.
 - **Font, Number size** - A typeface and number size for that one icon; 0 uses the shared setting.
 
 On by default: Charge, Intercept, Pummel, Overpower, Whirlwind, Bloodrage, Berserker Rage. The full list with spell IDs is at the end of this page.
@@ -183,6 +183,19 @@ The default look of every text. Each text's own font and format sit beside its b
 
 Player, target and target-of-target frames. Choose which one you are editing at the top; "Enable this frame" switches it on. Place and size them with the mouse while the menu is open.
 
+**Party window: you on top, then your party, in one floating window**
+
+- **Enable the party window** - Switches on all five rows (you, then party 1 to 4). The window grows and shrinks with your group.
+- **Move it any time** - Hold CTRL + ALT + SHIFT and the left mouse button on it, with the menu open or closed. Let go of the button to drop it.
+- **Size it any time** - Hold the same three keys and roll the mouse wheel. The wheel is only taken while the keys are held, so it never blocks the camera.
+- **Not in combat** - The game does not allow moving or sizing it during combat.
+- **Clicks that cast** - Seven boxes: left, right, middle, Shift + left, Shift + right, Ctrl + left, Alt + left. Type a spell name exactly as in your spellbook and that click casts it on the player in that row WITHOUT changing your target. Type target, or menu, or leave it empty for nothing.
+- **Mouseover** - Pointing at a row also makes that player your mouseover unit, so mouseover macros work on the window.
+- **Window background, Hide when not in a group** - Draw the window behind the rows or not; hide the whole window while you are alone.
+- **The rows** - Pick You (party) or Party 1 to 4 at the top of the tab to change how a row looks; every frame option below applies to it.
+
+**Every frame**
+
 - **General** - Enable this frame, Hide the game's own frame, Width, Height, Opacity, Strata, Frame level, Bar texture, Smooth bars, Mouseover highlight, Threat border.
 - **Fader** - Fade when idle, Idle opacity, Full in combat, Full with a target, Full on mouseover.
 - **Health** - Colour, Background opacity, Custom colour, Reverse fill, Show incoming heals, Cutaway (health just lost), Text, Text position, Text offset X, Text offset Y.
@@ -192,7 +205,7 @@ Player, target and target-of-target frames. Choose which one you are editing at 
 - **Portrait** - Show portrait, Style, Side, Width (0 = square).
 - **Cast bar** - Show cast bar, Hide the game's cast bar, Width (0 = frame width), Height, Position, Bar colour, Spell icon, Time left.
 - **Buffs** - Show buffs, Only mine, How many, Icon size, Position.
-- **Debuffs** - Show debuffs, Only mine, How many, Icon size, Position.
+- **Debuffs** - Show debuffs, Tint health bar by debuff type, Health bars on enemy nameplates, Nameplate bar width, Nameplate bar height, Combo points on the bar I add them to, Tint that bar by debuff type, Enemy buffs I can steal or dispel, above the bar, Debuffs I applied or can dispel, under the bar, Only mine, How many, Icon size, Position.
 - **Aura bars** - Show aura bars, Only mine, Show, How many, Bar height.
 - **Info panel** - Name and health on a strip below, Strip height.
 - **Custom texts** - Text 1, Text 1 position, Text 1 offset X, Text 1 offset Y, Text 2, Text 2 position, Text 2 offset X, Text 2 offset Y.
